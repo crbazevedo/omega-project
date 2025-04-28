@@ -1,0 +1,130 @@
+// Exemplo 2: Regressão Linear Simples
+// Este exemplo demonstra como implementar um modelo de regressão linear
+// para prever um valor contínuo usando ΩMetaLang.
+
+Omega LinearRegressionExample {
+    // Definição dos dados
+    data HousingDataset {
+        source: "datasets/boston_housing.csv";
+        features: ["RM"];  // Usando apenas o número médio de quartos (RM) como feature
+        target: "MEDV"; // Prever o valor mediano das casas (MEDV)
+        preprocess: {
+            normalize: "standard"  // Normalização Z-score
+        };
+        split: {
+            train: 0.7,
+            validation: 0.15,
+            test: 0.15,
+            seed: 123
+        };
+    }
+    
+    // Definição do modelo de regressão linear
+    model LinearRegression<Float, Float> {
+        // Parâmetros treináveis
+        param weight: Float = initialize.random_normal(0.0, 0.1); // Coeficiente angular
+        param bias: Float = 0.0; // Intercepto
+        
+        // Hiperparâmetros
+        config learning_rate: Float = 0.001;
+        config max_iterations: Int = 500;
+        
+        // Método de forward pass (predição)
+        function forward(x: Float) -> Float {
+            return x * weight + bias;
+        }
+    }
+    
+    // Definição do objetivo de otimização
+    objective RegressionObjective {
+        // Função de perda principal: Erro Quadrático Médio (MSE)
+        minimize: mse(
+            model.forward(data.features), 
+            data.target
+        );
+        
+        // Métricas para avaliação
+        metrics: {
+            mae: mae(model.forward(data.features), data.target), // Erro Absoluto Médio
+            rmse: rmse(model.forward(data.features), data.target), // Raiz do Erro Quadrático Médio
+            r2: r2_score(model.forward(data.features), data.target) // Coeficiente de Determinação (R²)
+        };
+    }
+    
+    // Definição do experimento
+    experiment HousingPricePrediction {
+        // Componentes principais
+        model: LinearRegression;
+        data: HousingDataset;
+        objective: RegressionObjective;
+        
+        // Configuração do otimizador
+        optimizer: GradientDescent {
+            learning_rate: model.learning_rate
+        };
+        
+        // Configuração de treinamento
+        train: {
+            batch_size: 16,
+            epochs: 50,
+            early_stopping: {
+                monitor: "validation_loss",
+                patience: 5,
+                min_delta: 0.0001
+            }
+        };
+        
+        // Configuração de avaliação
+        evaluate: {
+            metrics: ["mae", "rmse", "r2"],
+            on: "test"
+        };
+        
+        // Configuração de visualização
+        visualize: {
+            scatter_plot: {
+                x: data.features,
+                y_true: data.target,
+                y_pred: model.forward(data.features)
+            },
+            residuals_plot: true
+        };
+    }
+    
+    // Função principal para executar o experimento
+    function main() {
+        print("Carregando dados de moradia...");
+        var dataset = load(HousingDataset);
+        
+        print("Inicializando modelo de regressão linear...");
+        var model = LinearRegression{};
+        
+        print("Treinando modelo...");
+        var training_results = train(
+            model: model,
+            data: dataset,
+            objective: RegressionObjective,
+            optimizer: GradientDescent{learning_rate: model.learning_rate},
+            epochs: 50,
+            batch_size: 16,
+            early_stopping: true
+        );
+        
+        print("Avaliando modelo...");
+        var evaluation_metrics = evaluate(
+            model: model,
+            data: dataset.test,
+            metrics: ["mae", "rmse", "r2"]
+        );
+        
+        print("Resultados da avaliação (Regressão Linear):");
+        for (var (metric, value) in evaluation_metrics) {
+            print(f"{metric}: {value:.4f}");
+        }
+        
+        print("Salvando modelo...");
+        save(model, "models/housing_linear_regression.model");
+        
+        print("Experimento de Regressão Linear concluído!");
+    }
+}

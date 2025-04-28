@@ -1,0 +1,159 @@
+// Exemplo 1: Classificação Binária com Regressão Logística
+// Este exemplo demonstra como implementar um modelo de regressão logística
+// para classificação binária usando ΩMetaLang.
+
+Omega BinaryClassification {
+    // Definição dos dados
+    data DiabetesDataset {
+        source: "datasets/diabetes.csv";
+        features: ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", 
+                  "Insulin", "BMI", "DiabetesPedigreeFunction", "Age"];
+        target: "Outcome";
+        preprocess: {
+            normalize: "standard",  // Normalização Z-score (média 0, desvio padrão 1)
+            handle_missing: "mean"  // Preenche valores ausentes com a média
+        };
+        split: {
+            train: 0.7,
+            validation: 0.15,
+            test: 0.15,
+            seed: 42  // Semente para reprodutibilidade
+        };
+    }
+    
+    // Definição do modelo de regressão logística
+    model LogisticRegression<Vector<Float>, Float> {
+        // Parâmetros treináveis
+        param weights: Vector<Float> = initialize.zeros(8);  // 8 features
+        param bias: Float = 0.0;
+        
+        // Hiperparâmetros (configuração)
+        config learning_rate: Float = 0.01;
+        config regularization: Float = 0.001;  // L2 regularization strength
+        config max_iterations: Int = 1000;
+        config tolerance: Float = 1e-6;
+        
+        // Método de forward pass (predição)
+        function forward(x: Vector<Float>) -> Float {
+            var z = dot_product(x, weights) + bias;
+            return sigmoid(z);  // Função sigmoid: 1 / (1 + exp(-z))
+        }
+        
+        // Método de predição de classe (0 ou 1)
+        function predict_class(x: Vector<Float>) -> Int {
+            var prob = forward(x);
+            return if (prob >= 0.5) 1 else 0;
+        }
+        
+        // Função auxiliar: sigmoid
+        function sigmoid(z: Float) -> Float {
+            return 1.0 / (1.0 + exp(-z));
+        }
+    }
+    
+    // Definição do objetivo de otimização
+    objective BinaryClassificationObjective {
+        // Função de perda principal: entropia cruzada binária
+        minimize: binary_cross_entropy(
+            model.forward(data.features), 
+            data.target
+        );
+        
+        // Regularização L2 para evitar overfitting
+        regularize: l2(model.weights, model.regularization);
+        
+        // Métricas para avaliação
+        metrics: {
+            accuracy: accuracy(model.predict_class(data.features), data.target),
+            precision: precision(model.predict_class(data.features), data.target),
+            recall: recall(model.predict_class(data.features), data.target),
+            f1_score: f1_score(model.predict_class(data.features), data.target),
+            auc: auc_roc(model.forward(data.features), data.target)
+        };
+    }
+    
+    // Definição do experimento
+    experiment DiabetesClassification {
+        // Componentes principais
+        model: LogisticRegression;
+        data: DiabetesDataset;
+        objective: BinaryClassificationObjective;
+        
+        // Configuração do otimizador
+        optimizer: GradientDescent {
+            learning_rate: model.learning_rate,
+            momentum: 0.9
+        };
+        
+        // Configuração de treinamento
+        train: {
+            batch_size: 32,
+            epochs: 100,
+            early_stopping: {
+                monitor: "validation_loss",
+                patience: 10,
+                min_delta: 0.001
+            }
+        };
+        
+        // Configuração de avaliação
+        evaluate: {
+            metrics: ["accuracy", "precision", "recall", "f1_score", "auc"],
+            confusion_matrix: true,
+            on: "test"  // Avaliar no conjunto de teste
+        };
+        
+        // Configuração de visualização
+        visualize: {
+            learning_curve: true,
+            feature_importance: true,
+            roc_curve: true
+        };
+    }
+    
+    // Função principal para executar o experimento
+    function main() {
+        // Carregar dados
+        print("Carregando dados...");
+        var dataset = load(DiabetesDataset);
+        
+        // Inicializar modelo
+        print("Inicializando modelo...");
+        var model = LogisticRegression{};
+        
+        // Treinar modelo
+        print("Treinando modelo...");
+        var results = train(
+            model: model,
+            data: dataset,
+            objective: BinaryClassificationObjective,
+            optimizer: GradientDescent{
+                learning_rate: model.learning_rate,
+                momentum: 0.9
+            },
+            epochs: 100,
+            batch_size: 32,
+            early_stopping: true
+        );
+        
+        // Avaliar modelo
+        print("Avaliando modelo...");
+        var metrics = evaluate(
+            model: model,
+            data: dataset.test,
+            metrics: ["accuracy", "precision", "recall", "f1_score", "auc"]
+        );
+        
+        // Exibir resultados
+        print("Resultados da avaliação:");
+        for (var (metric, value) in metrics) {
+            print(f"{metric}: {value:.4f}");
+        }
+        
+        // Salvar modelo
+        print("Salvando modelo...");
+        save(model, "models/diabetes_logistic_regression.model");
+        
+        print("Experimento concluído!");
+    }
+}
