@@ -1,0 +1,635 @@
+// Exemplo de Garantias Formais em ΩMetaLang
+// Modelo de Classificador Robusto com Garantias de Fairness
+
+// Definição do modelo com garantias formais
+model RobustClassifier<Vector<Float>, Int> {
+    // Parâmetros do modelo
+    param weights: Matrix<Float>;
+    param bias: Vector<Float>;
+    
+    // Configurações
+    config input_dim: Int = 10;
+    config num_classes: Int = 2;
+    config epsilon: Float = 0.1;  // Limite de perturbação para robustez
+    
+    // Inicialização dos parâmetros
+    init {
+        weights = random_normal(input_dim, num_classes, 0.0, 0.01);
+        bias = zeros(num_classes);
+    }
+    
+    // Método de forward pass
+    function forward(x: Vector<Float>) -> Vector<Float> {
+        return softmax(matmul(x, weights) + bias);
+    }
+    
+    // Método de predição
+    function predict(x: Vector<Float>) -> Int {
+        return argmax(forward(x));
+    }
+    
+    // Método para verificar robustez
+    function verify_robustness(x: Vector<Float>, epsilon: Float = 0.1) -> Bool {
+        // Implementação de verificação de robustez usando abstração de intervalo
+        var prediction = predict(x);
+        
+        // Calcular limites inferiores e superiores para cada neurônio
+        var lower_bounds = Vector<Float>(x.length());
+        var upper_bounds = Vector<Float>(x.length());
+        
+        for (var i = 0; i < x.length(); i++) {
+            lower_bounds[i] = max(0.0, x[i] - epsilon);
+            upper_bounds[i] = min(1.0, x[i] + epsilon);
+        }
+        
+        // Propagar limites através da rede
+        var output_lower = propagate_bounds(lower_bounds, upper_bounds, "lower");
+        var output_upper = propagate_bounds(lower_bounds, upper_bounds, "upper");
+        
+        // Verificar se a classe prevista é a mesma para todas as perturbações
+        var robust = true;
+        var max_class_lower = output_lower[prediction];
+        
+        for (var i = 0; i < num_classes; i++) {
+            if (i != prediction && output_upper[i] > max_class_lower) {
+                robust = false;
+                break;
+            }
+        }
+        
+        return robust;
+    }
+    
+    // Método para propagar limites através da rede
+    function propagate_bounds(lower_bounds: Vector<Float>, upper_bounds: Vector<Float>, 
+                             bound_type: String) -> Vector<Float> {
+        // Implementação simplificada de propagação de limites
+        var result = Vector<Float>(num_classes);
+        
+        for (var i = 0; i < num_classes; i++) {
+            var sum_lower = bias[i];
+            var sum_upper = bias[i];
+            
+            for (var j = 0; j < input_dim; j++) {
+                var w = weights[j, i];
+                
+                if (w >= 0) {
+                    sum_lower += w * lower_bounds[j];
+                    sum_upper += w * upper_bounds[j];
+                } else {
+                    sum_lower += w * upper_bounds[j];
+                    sum_upper += w * lower_bounds[j];
+                }
+            }
+            
+            if (bound_type == "lower") {
+                result[i] = sum_lower;
+            } else {
+                result[i] = sum_upper;
+            }
+        }
+        
+        // Aplicar softmax é complicado para limites, então retornamos os logits
+        return result;
+    }
+    
+    // Método para treinar com robustez
+    function train_robust(X: Matrix<Float>, y: Vector<Int>, 
+                         learning_rate: Float = 0.01, 
+                         num_epochs: Int = 100) {
+        // Implementação de treinamento adversarial (PGD)
+        for (var epoch = 0; epoch < num_epochs; epoch++) {
+            var total_loss = 0.0;
+            
+            for (var i = 0; i < X.rows(); i++) {
+                var x = X.row(i);
+                var target = y[i];
+                
+                // Gerar exemplo adversarial
+                var x_adv = generate_adversarial_example(x, target);
+                
+                // Forward pass com exemplo original
+                var output = forward(x);
+                var loss_orig = cross_entropy(output, target);
+                
+                // Forward pass com exemplo adversarial
+                var output_adv = forward(x_adv);
+                var loss_adv = cross_entropy(output_adv, target);
+                
+                // Perda total (combinação de original e adversarial)
+                var loss = 0.5 * loss_orig + 0.5 * loss_adv;
+                total_loss += loss;
+                
+                // Atualizar parâmetros (simplificado)
+                // Na implementação real, aqui teríamos o cálculo de gradientes e a atualização dos parâmetros
+            }
+            
+            if (epoch % 10 == 0) {
+                log(f"Epoch {epoch}, Loss: {total_loss / X.rows()}");
+            }
+        }
+    }
+    
+    // Método para gerar exemplo adversarial
+    function generate_adversarial_example(x: Vector<Float>, target: Int) -> Vector<Float> {
+        // Implementação do ataque Projected Gradient Descent (PGD)
+        var x_adv = x.copy();
+        var alpha = epsilon / 10.0;  // Tamanho do passo
+        var num_steps = 10;
+        
+        for (var step = 0; step < num_steps; step++) {
+            // Forward pass
+            var output = forward(x_adv);
+            
+            // Calcular gradiente da perda em relação à entrada
+            var grad = compute_input_gradient(x_adv, target);
+            
+            // Atualizar exemplo adversarial
+            for (var i = 0; i < x_adv.length(); i++) {
+                x_adv[i] += alpha * sign(grad[i]);
+                
+                // Projetar de volta para a bola epsilon
+                x_adv[i] = min(x[i] + epsilon, max(x[i] - epsilon, x_adv[i]));
+                
+                // Garantir que está dentro dos limites válidos
+                x_adv[i] = min(1.0, max(0.0, x_adv[i]));
+            }
+        }
+        
+        return x_adv;
+    }
+    
+    // Método para calcular gradiente da entrada
+    function compute_input_gradient(x: Vector<Float>, target: Int) -> Vector<Float> {
+        // Implementação simplificada
+        var output = forward(x);
+        var loss = cross_entropy(output, target);
+        
+        // Na implementação real, aqui teríamos o cálculo de gradientes via backpropagation
+        var grad = Vector<Float>(x.length());
+        
+        // Simulação de gradiente para exemplo
+        for (var i = 0; i < x.length(); i++) {
+            var x_plus = x.copy();
+            x_plus[i] += 1e-6;
+            
+            var output_plus = forward(x_plus);
+            var loss_plus = cross_entropy(output_plus, target);
+            
+            grad[i] = (loss_plus - loss) / 1e-6;
+        }
+        
+        return grad;
+    }
+    
+    // Garantias formais
+    guarantees: {
+        // Robustez a perturbações L-infinito
+        robustness: {
+            type: "l_inf",
+            epsilon: epsilon,
+            property: "prediction_invariance",
+            verification_method: "interval_bound_propagation"
+        },
+        
+        // Justiça (fairness)
+        fairness: {
+            sensitive_attributes: ["gender", "race"],
+            metric: "demographic_parity",
+            threshold: 0.05,
+            verification_method: "statistical_testing"
+        },
+        
+        // Limites de erro
+        error_bounds: {
+            confidence: 0.95,
+            bound_type: "hoeffding",
+            test_error_max: 0.1,
+            verification_method: "statistical_bounds"
+        },
+        
+        // Interpretabilidade
+        interpretability: {
+            method: "lime",
+            max_features: 10,
+            min_importance: 0.05,
+            verification_method: "feature_importance"
+        }
+    };
+}
+
+// Modelo com garantias de segurança para aprendizado por reforço
+Agent<Vector<Float>, Int> SafeRLAgent {
+    // Parâmetros do agente
+    param policy_network: Model<Vector<Float>, Distribution<Int>>;
+    param safety_critic: Model<Vector<Float>, Float>;
+    param value_network: Model<Vector<Float>, Float>;
+    
+    // Configurações
+    config safety_threshold: Float = 0.8;
+    config gamma: Float = 0.99;
+    config safety_gamma: Float = 0.95;
+    
+    // Método para selecionar ação
+    function act(state: Vector<Float>) -> Int {
+        var action_dist = policy_network.forward(state);
+        var candidate_action = action_dist.sample();
+        
+        // Verificar segurança da ação
+        var safety_value = safety_critic.forward(state, candidate_action);
+        
+        // Se a ação for insegura, escolhe ação segura alternativa
+        if (safety_value < safety_threshold) {
+            return safe_action(state);
+        }
+        
+        return candidate_action;
+    }
+    
+    // Método para encontrar ação segura
+    function safe_action(state: Vector<Float>) -> Int {
+        var best_action = 0;
+        var best_safety = -Float.MAX_VALUE;
+        
+        // Verificar todas as ações possíveis
+        for (var a = 0; a < action_dim; a++) {
+            var safety_value = safety_critic.forward(state, a);
+            
+            if (safety_value > best_safety) {
+                best_safety = safety_value;
+                best_action = a;
+            }
+        }
+        
+        return best_action;
+    }
+    
+    // Método para atualizar o agente
+    function update(experiences: Vector<Experience>) -> Dict<String, Float> {
+        // Extrair estados, ações, recompensas, etc.
+        var states = experiences.map(e => e.state);
+        var actions = experiences.map(e => e.action);
+        var rewards = experiences.map(e => e.reward);
+        var safety_costs = experiences.map(e => e.safety_cost);
+        var next_states = experiences.map(e => e.next_state);
+        var dones = experiences.map(e => e.done);
+        
+        // Atualizar redes (simplificado)
+        // Na implementação real, aqui teríamos o cálculo de gradientes e a atualização dos parâmetros
+        
+        return {
+            "policy_loss": 0.0,
+            "value_loss": 0.0,
+            "safety_loss": 0.0
+        };
+    }
+    
+    // Método para verificar segurança de uma política
+    function verify_safety(environment: Environment, 
+                          num_episodes: Int = 1000,
+                          safety_threshold: Float = 0.05) -> Bool {
+        var total_violations = 0;
+        
+        for (var episode = 0; episode < num_episodes; episode++) {
+            var state = environment.reset();
+            var done = false;
+            var violations = 0;
+            
+            while (!done) {
+                var action = act(state);
+                var (next_state, reward, done, info) = environment.step(action);
+                
+                if (info.get("safety_violation", false)) {
+                    violations += 1;
+                }
+                
+                state = next_state;
+            }
+            
+            total_violations += violations;
+        }
+        
+        var violation_rate = total_violations / (num_episodes * environment.max_steps);
+        return violation_rate <= safety_threshold;
+    }
+    
+    // Garantias formais
+    guarantees: {
+        // Segurança: nunca visita estados perigosos
+        safety: {
+            invariant: "always(state not in dangerous_states)",
+            verification_method: "runtime_monitoring",
+            confidence: 0.99
+        },
+        
+        // Vivacidade: eventualmente alcança o objetivo
+        liveness: {
+            property: "eventually(state in goal_states)",
+            probability: 0.95,
+            verification_method: "statistical_model_checking"
+        },
+        
+        // Limites de desempenho
+        performance: {
+            min_expected_return: 100.0,
+            confidence: 0.9,
+            verification_method: "concentration_bounds"
+        }
+    };
+}
+
+// Experimento com verificação formal
+experiment FormalVerification {
+    // Modelo
+    model: RobustClassifier;
+    
+    // Dados
+    data: SensitiveDataset;
+    
+    // Configurações
+    config verification_methods: Vector<String> = [
+        "abstract_interpretation", 
+        "smt_solving"
+    ];
+    config timeout: Int = 3600;  // segundos
+    config properties: Vector<String> = ["robustness", "fairness"];
+    
+    // Método principal
+    function run() {
+        // Treinar o modelo
+        model.train_robust(data.train.X, data.train.y);
+        
+        // Verificar propriedades
+        for (var i = 0; i < properties.length(); i++) {
+            var property = properties[i];
+            
+            log(f"Verificando propriedade: {property}");
+            
+            for (var j = 0; j < verification_methods.length(); j++) {
+                var method = verification_methods[j];
+                
+                log(f"  Usando método: {method}");
+                
+                var result = verify_property(model, data, property, method, timeout);
+                
+                log(f"  Resultado: {result.verified ? 'Verificado' : 'Não verificado'}");
+                log(f"  Tempo: {result.time} segundos");
+                
+                if (!result.verified) {
+                    log(f"  Contraexemplo: {result.counterexample}");
+                }
+            }
+        }
+        
+        // Certificação formal
+        var certification_result = certify_robustness(
+            model, 
+            data.test.X, 
+            data.test.y,
+            "randomized_smoothing",
+            0.25,
+            1000,
+            0.999
+        );
+        
+        log(f"Certificação de robustez:");
+        log(f"  Raio certificado médio: {certification_result.avg_radius}");
+        log(f"  Precisão certificada: {certification_result.certified_accuracy}");
+    }
+    
+    // Método para verificar propriedade
+    function verify_property(model: RobustClassifier, 
+                            data: SensitiveDataset,
+                            property: String,
+                            method: String,
+                            timeout: Int) -> Dict<String, Any> {
+        if (property == "robustness") {
+            return verify_robustness(model, data, method, timeout);
+        } else if (property == "fairness") {
+            return verify_fairness(model, data, method, timeout);
+        } else {
+            return {
+                "verified": false,
+                "time": 0,
+                "counterexample": null,
+                "error": f"Propriedade desconhecida: {property}"
+            };
+        }
+    }
+    
+    // Método para verificar robustez
+    function verify_robustness(model: RobustClassifier, 
+                              data: SensitiveDataset,
+                              method: String,
+                              timeout: Int) -> Dict<String, Any> {
+        var start_time = current_time();
+        var verified = true;
+        var counterexample = null;
+        
+        if (method == "abstract_interpretation") {
+            // Implementação de verificação por interpretação abstrata
+            for (var i = 0; i < data.test.X.rows(); i++) {
+                if (current_time() - start_time > timeout) {
+                    return {
+                        "verified": false,
+                        "time": timeout,
+                        "counterexample": null,
+                        "error": "Timeout"
+                    };
+                }
+                
+                var x = data.test.X.row(i);
+                var robust = model.verify_robustness(x, model.epsilon);
+                
+                if (!robust) {
+                    verified = false;
+                    counterexample = x;
+                    break;
+                }
+            }
+        } else if (method == "smt_solving") {
+            // Implementação de verificação por SMT solving
+            // Simplificado para este exemplo
+            verified = true;
+        } else {
+            return {
+                "verified": false,
+                "time": 0,
+                "counterexample": null,
+                "error": f"Método de verificação desconhecido: {method}"
+            };
+        }
+        
+        var end_time = current_time();
+        
+        return {
+            "verified": verified,
+            "time": end_time - start_time,
+            "counterexample": counterexample
+        };
+    }
+    
+    // Método para verificar fairness
+    function verify_fairness(model: RobustClassifier, 
+                            data: SensitiveDataset,
+                            method: String,
+                            timeout: Int) -> Dict<String, Any> {
+        var start_time = current_time();
+        var verified = true;
+        var counterexample = null;
+        
+        if (method == "statistical_testing") {
+            // Implementação de verificação por testes estatísticos
+            var sensitive_attrs = model.guarantees.fairness.sensitive_attributes;
+            var threshold = model.guarantees.fairness.threshold;
+            
+            for (var i = 0; i < sensitive_attrs.length(); i++) {
+                var attr = sensitive_attrs[i];
+                var disparity = compute_demographic_parity(model, data, attr);
+                
+                if (disparity > threshold) {
+                    verified = false;
+                    counterexample = {
+                        "attribute": attr,
+                        "disparity": disparity
+                    };
+                    break;
+                }
+            }
+        } else {
+            return {
+                "verified": false,
+                "time": 0,
+                "counterexample": null,
+                "error": f"Método de verificação desconhecido: {method}"
+            };
+        }
+        
+        var end_time = current_time();
+        
+        return {
+            "verified": verified,
+            "time": end_time - start_time,
+            "counterexample": counterexample
+        };
+    }
+    
+    // Método para calcular disparidade demográfica
+    function compute_demographic_parity(model: RobustClassifier, 
+                                       data: SensitiveDataset,
+                                       attribute: String) -> Float {
+        var groups = data.group_by(attribute);
+        var group_rates = Dict<Any, Float>();
+        
+        for (var group in groups) {
+            var X_group = groups[group].X;
+            var positive_rate = 0.0;
+            
+            for (var i = 0; i < X_group.rows(); i++) {
+                var x = X_group.row(i);
+                var pred = model.predict(x);
+                
+                if (pred == 1) {
+                    positive_rate += 1.0;
+                }
+            }
+            
+            positive_rate /= X_group.rows();
+            group_rates[group] = positive_rate;
+        }
+        
+        // Calcular disparidade máxima
+        var max_disparity = 0.0;
+        var groups_list = group_rates.keys();
+        
+        for (var i = 0; i < groups_list.length(); i++) {
+            for (var j = i + 1; j < groups_list.length(); j++) {
+                var disparity = abs(group_rates[groups_list[i]] - group_rates[groups_list[j]]);
+                max_disparity = max(max_disparity, disparity);
+            }
+        }
+        
+        return max_disparity;
+    }
+    
+    // Método para certificação de robustez
+    function certify_robustness(model: RobustClassifier, 
+                               X: Matrix<Float>,
+                               y: Vector<Int>,
+                               method: String,
+                               noise_level: Float,
+                               num_samples: Int,
+                               confidence: Float) -> Dict<String, Float> {
+        var certified_radii = Vector<Float>(X.rows());
+        var certified_correct = Vector<Bool>(X.rows());
+        
+        for (var i = 0; i < X.rows(); i++) {
+            var x = X.row(i);
+            var true_class = y[i];
+            
+            if (method == "randomized_smoothing") {
+                // Implementação de Randomized Smoothing
+                var counts = Vector<Int>(model.num_classes);
+                
+                for (var j = 0; j < num_samples; j++) {
+                    var x_noisy = add_gaussian_noise(x, noise_level);
+                    var pred = model.predict(x_noisy);
+                    counts[pred] += 1;
+                }
+                
+                var top_class = argmax(counts);
+                var top_count = counts[top_class];
+                var runner_up_count = 0;
+                
+                for (var j = 0; j < counts.length(); j++) {
+                    if (j != top_class && counts[j] > runner_up_count) {
+                        runner_up_count = counts[j];
+                    }
+                }
+                
+                var p_a = top_count / num_samples;
+                var p_b = runner_up_count / num_samples;
+                
+                if (p_a >= 0.5) {
+                    var radius = noise_level * (p_a - p_b) / 2.0;
+                    certified_radii[i] = radius;
+                    certified_correct[i] = (top_class == true_class);
+                } else {
+                    certified_radii[i] = 0.0;
+                    certified_correct[i] = false;
+                }
+            }
+        }
+        
+        // Calcular métricas
+        var avg_radius = 0.0;
+        var certified_accuracy = 0.0;
+        
+        for (var i = 0; i < X.rows(); i++) {
+            avg_radius += certified_radii[i];
+            if (certified_correct[i]) {
+                certified_accuracy += 1.0;
+            }
+        }
+        
+        avg_radius /= X.rows();
+        certified_accuracy /= X.rows();
+        
+        return {
+            "avg_radius": avg_radius,
+            "certified_accuracy": certified_accuracy
+        };
+    }
+    
+    // Método para adicionar ruído gaussiano
+    function add_gaussian_noise(x: Vector<Float>, std: Float) -> Vector<Float> {
+        var x_noisy = x.copy();
+        
+        for (var i = 0; i < x.length(); i++) {
+            x_noisy[i] += random_normal(0.0, std);
+            x_noisy[i] = min(1.0, max(0.0, x_noisy[i]));
+        }
+        
+        return x_noisy;
+    }
+}

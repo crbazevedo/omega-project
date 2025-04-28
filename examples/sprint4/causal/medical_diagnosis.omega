@@ -1,0 +1,549 @@
+// Exemplo de Inferência Causal em ΩMetaLang
+// Modelo Causal Estrutural para Diagnóstico Médico
+
+// Definição de um modelo causal estrutural
+causal_model MedicalDiagnosis {
+    // Variáveis do modelo
+    variables: {
+        Age: Continuous,
+        Gender: Binary,
+        Smoking: Binary,
+        Genetics: Categorical(4),
+        BloodPressure: Continuous,
+        Cholesterol: Continuous,
+        HeartDisease: Binary
+    };
+    
+    // Grafo causal (estrutura)
+    structure: {
+        Age -> BloodPressure,
+        Age -> Cholesterol,
+        Gender -> BloodPressure,
+        Smoking -> BloodPressure,
+        Smoking -> Cholesterol,
+        Genetics -> Cholesterol,
+        Genetics -> HeartDisease,
+        BloodPressure -> HeartDisease,
+        Cholesterol -> HeartDisease
+    };
+    
+    // Mecanismos estruturais (funções)
+    mechanisms: {
+        BloodPressure: f_bp(Age, Gender, Smoking) + Noise(0, 1),
+        Cholesterol: f_chol(Age, Smoking, Genetics) + Noise(0, 0.8),
+        HeartDisease: sigmoid(f_hd(BloodPressure, Cholesterol, Genetics))
+    };
+    
+    // Definição das funções estruturais
+    function f_bp(age: Float, gender: Binary, smoking: Binary) -> Float {
+        return 120.0 + 0.5 * age + 5.0 * gender + 10.0 * smoking;
+    }
+    
+    function f_chol(age: Float, smoking: Binary, genetics: Int) -> Float {
+        return 150.0 + 0.3 * age + 20.0 * smoking + 10.0 * genetics;
+    }
+    
+    function f_hd(bp: Float, chol: Float, genetics: Int) -> Float {
+        return -10.0 + 0.05 * (bp - 120.0) + 0.02 * (chol - 200.0) + 0.5 * genetics;
+    }
+    
+    // Métodos para inferência causal
+    
+    // Método para calcular efeito causal médio do tratamento (ATE)
+    function average_treatment_effect(treatment: String, outcome: String) -> Float {
+        // Implementação do operador do() de Pearl
+        var effect_treated = expectation(outcome, do(treatment, 1));
+        var effect_control = expectation(outcome, do(treatment, 0));
+        return effect_treated - effect_control;
+    }
+    
+    // Método para calcular efeito causal condicional
+    function conditional_average_treatment_effect(treatment: String, outcome: String, 
+                                                 condition: Dict<String, Any>) -> Float {
+        var effect_treated = expectation(outcome, do(treatment, 1), condition);
+        var effect_control = expectation(outcome, do(treatment, 0), condition);
+        return effect_treated - effect_control;
+    }
+    
+    // Método para análise de mediação causal
+    function mediation_analysis(treatment: String, outcome: String, 
+                               mediator: String) -> Dict<String, Float> {
+        // Efeito direto natural (NDE)
+        var nde = expectation(outcome, do(treatment, 1), do(mediator, M(0))) - 
+                 expectation(outcome, do(treatment, 0), do(mediator, M(0)));
+        
+        // Efeito indireto natural (NIE)
+        var nie = expectation(outcome, do(treatment, 1), do(mediator, M(1))) - 
+                 expectation(outcome, do(treatment, 1), do(mediator, M(0)));
+        
+        // Efeito total
+        var total_effect = nde + nie;
+        
+        // Proporção mediada
+        var proportion_mediated = nie / total_effect;
+        
+        return {
+            "direct_effect": nde,
+            "indirect_effect": nie,
+            "total_effect": total_effect,
+            "proportion_mediated": proportion_mediated
+        };
+    }
+    
+    // Método para análise de sensibilidade
+    function sensitivity_analysis(treatment: String, outcome: String, 
+                                 unobserved_confounder: Dict<String, Any>) -> Dict<String, Float> {
+        // Implementação de análise de sensibilidade para confundimento não observado
+        var original_ate = average_treatment_effect(treatment, outcome);
+        var biased_ate = compute_biased_ate(treatment, outcome, unobserved_confounder);
+        
+        return {
+            "original_ate": original_ate,
+            "biased_ate": biased_ate,
+            "bias": biased_ate - original_ate
+        };
+    }
+    
+    // Método auxiliar para análise de sensibilidade
+    function compute_biased_ate(treatment: String, outcome: String, 
+                               unobserved_confounder: Dict<String, Any>) -> Float {
+        // Implementação simplificada
+        var strength = unobserved_confounder.get("strength", 0.0);
+        var original_ate = average_treatment_effect(treatment, outcome);
+        
+        // Fórmula simplificada para o viés
+        var bias = strength * (unobserved_confounder.get("effect_on_outcome", 1.0) * 
+                              unobserved_confounder.get("effect_on_treatment", 1.0));
+        
+        return original_ate - bias;
+    }
+}
+
+// Experimento de estimação de efeitos causais
+experiment CausalEffectEstimation {
+    // Modelo causal
+    model: MedicalDiagnosis;
+    
+    // Dados
+    data: PatientRecords;
+    
+    // Configurações
+    config bootstrap_samples: Int = 1000;
+    config alpha: Float = 0.05;
+    
+    // Método principal
+    function run() {
+        // Estimar efeito causal médio do tratamento (ATE)
+        var smoking_effect = model.average_treatment_effect("Smoking", "HeartDisease");
+        
+        // Estimar efeito em subpopulação específica
+        var smoking_effect_elderly = model.conditional_average_treatment_effect(
+            "Smoking", "HeartDisease", {"Age": "> 65"}
+        );
+        
+        // Análise de mediação causal
+        var mediation_results = model.mediation_analysis(
+            "Smoking", "HeartDisease", "BloodPressure"
+        );
+        
+        // Análise de sensibilidade
+        var sensitivity_results = model.sensitivity_analysis(
+            "Smoking", "HeartDisease", {
+                "strength": 0.3,
+                "effect_on_outcome": 2.0,
+                "effect_on_treatment": 1.5
+            }
+        );
+        
+        // Reportar resultados
+        log(f"Efeito causal do tabagismo na doença cardíaca: {smoking_effect}");
+        log(f"Efeito causal do tabagismo na doença cardíaca (idosos): {smoking_effect_elderly}");
+        log(f"Análise de mediação - Efeito direto: {mediation_results['direct_effect']}");
+        log(f"Análise de mediação - Efeito indireto: {mediation_results['indirect_effect']}");
+        log(f"Análise de mediação - Proporção mediada: {mediation_results['proportion_mediated'] * 100}%");
+        log(f"Análise de sensibilidade - Viés potencial: {sensitivity_results['bias']}");
+    }
+}
+
+// Experimento de descoberta de estrutura causal
+experiment CausalDiscovery {
+    // Dados
+    data: ObservationalData;
+    
+    // Configuração do algoritmo
+    algorithm: {
+        type: "pc_algorithm",  // Algoritmo PC (Peter-Clark)
+        independence_test: "conditional_correlation",
+        alpha: 0.05
+    };
+    
+    // Conhecimento prévio
+    prior_knowledge: {
+        forbidden_edges: [
+            "Y -> X",  // Y não pode causar X
+            "Z -> X"   // Z não pode causar X
+        ],
+        required_edges: [
+            "X -> W"   // X deve causar W
+        ],
+        temporal_tiers: [
+            ["X", "Z"],  // Tier 1: variáveis que vêm primeiro
+            ["Y", "W"]   // Tier 2: variáveis que vêm depois
+        ]
+    };
+    
+    // Método principal
+    function run() {
+        // Executar algoritmo de descoberta causal
+        var causal_graph = discover_causal_structure(
+            data, 
+            algorithm.type,
+            algorithm.independence_test,
+            algorithm.alpha,
+            prior_knowledge
+        );
+        
+        // Validar o grafo causal descoberto
+        var validation_metrics = validate_causal_graph(
+            causal_graph,
+            data,
+            ["structural_hamming_distance", "intervention_accuracy"]
+        );
+        
+        // Reportar resultados
+        log(f"Grafo causal descoberto: {causal_graph.to_string()}");
+        log(f"Métricas de validação: {validation_metrics}");
+        
+        // Visualizar o grafo
+        visualize_graph(causal_graph);
+    }
+    
+    // Método para descoberta de estrutura causal
+    function discover_causal_structure(data: ObservationalData, 
+                                      algorithm_type: String,
+                                      independence_test: String,
+                                      alpha: Float,
+                                      prior_knowledge: Dict<String, Any>) -> CausalGraph {
+        // Implementação do algoritmo PC
+        var graph = CausalGraph();
+        
+        // Inicializar com grafo completo não direcionado
+        var variables = data.variables();
+        for (var i = 0; i < variables.length(); i++) {
+            for (var j = i + 1; j < variables.length(); j++) {
+                graph.add_edge(variables[i], variables[j], "undirected");
+            }
+        }
+        
+        // Fase 1: Remover arestas com base em independências condicionais
+        for (var d = 0; d <= variables.length() - 2; d++) {
+            for (var i = 0; i < variables.length(); i++) {
+                for (var j = 0; j < variables.length(); j++) {
+                    if (i != j && graph.has_edge(variables[i], variables[j])) {
+                        var neighbors = graph.neighbors(variables[i]);
+                        neighbors.remove(variables[j]);
+                        
+                        var conditioning_sets = combinations(neighbors, d);
+                        for (var k = 0; k < conditioning_sets.length(); k++) {
+                            var conditioning_set = conditioning_sets[k];
+                            
+                            if (is_conditionally_independent(
+                                data, variables[i], variables[j], conditioning_set, 
+                                independence_test, alpha
+                            )) {
+                                graph.remove_edge(variables[i], variables[j]);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fase 2: Orientar arestas
+        orient_edges(graph, data);
+        
+        // Aplicar conhecimento prévio
+        apply_prior_knowledge(graph, prior_knowledge);
+        
+        return graph;
+    }
+    
+    // Método para testar independência condicional
+    function is_conditionally_independent(data: ObservationalData,
+                                         var1: String, var2: String,
+                                         conditioning_set: Vector<String>,
+                                         test_type: String, alpha: Float) -> Bool {
+        // Implementação simplificada
+        var p_value = compute_conditional_independence_test(
+            data, var1, var2, conditioning_set, test_type
+        );
+        
+        return p_value > alpha;
+    }
+    
+    // Método para orientar arestas
+    function orient_edges(graph: CausalGraph, data: ObservationalData) {
+        // Implementação das regras de orientação do algoritmo PC
+        // Regra 1: Orientar v-structures (colliders)
+        for (var i = 0; i < graph.nodes().length(); i++) {
+            var a = graph.nodes()[i];
+            var neighbors_a = graph.neighbors(a);
+            
+            for (var j = 0; j < neighbors_a.length(); j++) {
+                var b = neighbors_a[j];
+                
+                for (var k = j + 1; k < neighbors_a.length(); k++) {
+                    var c = neighbors_a[k];
+                    
+                    if (!graph.has_edge(b, c)) {
+                        // Potencial v-structure: a - b - c
+                        var separating_set = find_separating_set(graph, b, c);
+                        
+                        if (!separating_set.contains(a)) {
+                            // a não está no conjunto separador de b e c
+                            // Orientar como b -> a <- c
+                            graph.orient_edge(b, a);
+                            graph.orient_edge(c, a);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Aplicar regras adicionais de orientação
+        var changed = true;
+        while (changed) {
+            changed = false;
+            
+            // Regra 2: Se a -> b - c e a e c não são adjacentes, então b -> c
+            // Regra 3: Se a -> b -> c e a - c, então a -> c
+            // Regra 4: Se a - b -> c, a - d -> c, a e c não são adjacentes, então a -> b
+            
+            // Implementação das regras omitida para brevidade
+        }
+    }
+    
+    // Método para aplicar conhecimento prévio
+    function apply_prior_knowledge(graph: CausalGraph, 
+                                  prior_knowledge: Dict<String, Any>) {
+        // Aplicar arestas proibidas
+        var forbidden_edges = prior_knowledge.get("forbidden_edges", []);
+        for (var i = 0; i < forbidden_edges.length(); i++) {
+            var edge = parse_edge(forbidden_edges[i]);
+            graph.remove_edge(edge.from, edge.to);
+        }
+        
+        // Aplicar arestas obrigatórias
+        var required_edges = prior_knowledge.get("required_edges", []);
+        for (var i = 0; i < required_edges.length(); i++) {
+            var edge = parse_edge(required_edges[i]);
+            graph.add_edge(edge.from, edge.to, "directed");
+        }
+        
+        // Aplicar tiers temporais
+        var temporal_tiers = prior_knowledge.get("temporal_tiers", []);
+        for (var i = 0; i < temporal_tiers.length() - 1; i++) {
+            var tier1 = temporal_tiers[i];
+            
+            for (var j = i + 1; j < temporal_tiers.length(); j++) {
+                var tier2 = temporal_tiers[j];
+                
+                // Variáveis em tier posterior não podem causar variáveis em tier anterior
+                for (var k = 0; k < tier2.length(); k++) {
+                    for (var l = 0; l < tier1.length(); l++) {
+                        graph.remove_edge(tier2[k], tier1[l]);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Método para validar o grafo causal descoberto
+    function validate_causal_graph(graph: CausalGraph,
+                                  data: ObservationalData,
+                                  metrics: Vector<String>) -> Dict<String, Float> {
+        var results = Dict<String, Float>();
+        
+        // Calcular métricas de validação
+        for (var i = 0; i < metrics.length(); i++) {
+            var metric = metrics[i];
+            
+            if (metric == "structural_hamming_distance") {
+                results[metric] = compute_shd(graph, data.true_graph());
+            } else if (metric == "intervention_accuracy") {
+                results[metric] = compute_intervention_accuracy(graph, data);
+            }
+        }
+        
+        return results;
+    }
+    
+    // Método para calcular distância de Hamming estrutural
+    function compute_shd(graph1: CausalGraph, graph2: CausalGraph) -> Float {
+        var shd = 0;
+        var nodes = graph1.nodes();
+        
+        for (var i = 0; i < nodes.length(); i++) {
+            for (var j = 0; j < nodes.length(); j++) {
+                if (i != j) {
+                    var edge1 = graph1.edge_type(nodes[i], nodes[j]);
+                    var edge2 = graph2.edge_type(nodes[i], nodes[j]);
+                    
+                    if (edge1 != edge2) {
+                        shd += 1;
+                    }
+                }
+            }
+        }
+        
+        return shd / 2.0;  // Dividir por 2 para não contar duas vezes
+    }
+    
+    // Método para calcular precisão de intervenção
+    function compute_intervention_accuracy(graph: CausalGraph, 
+                                          data: ObservationalData) -> Float {
+        // Implementação simplificada
+        var correct_predictions = 0;
+        var total_predictions = 0;
+        
+        var interventions = data.interventional_data();
+        for (var i = 0; i < interventions.length(); i++) {
+            var intervention = interventions[i];
+            var target = intervention.target;
+            var value = intervention.value;
+            var observed_outcomes = intervention.outcomes;
+            
+            var predicted_outcomes = predict_intervention_outcomes(
+                graph, data, target, value
+            );
+            
+            for (var j = 0; j < observed_outcomes.length(); j++) {
+                var variable = observed_outcomes[j].variable;
+                var observed_value = observed_outcomes[j].value;
+                var predicted_value = predicted_outcomes[variable];
+                
+                if (abs(predicted_value - observed_value) < 0.1) {
+                    correct_predictions += 1;
+                }
+                
+                total_predictions += 1;
+            }
+        }
+        
+        return correct_predictions / total_predictions;
+    }
+}
+
+// Exemplo de modelo causal para tratamento de efeitos heterogêneos
+model HeterogeneousTreatmentEffect<Vector<Float>, Distribution<Float>> {
+    // Parâmetros do modelo
+    param treatment_network: Model<Vector<Float>, Float>;
+    param prognostic_network: Model<Vector<Float>, Float>;
+    param propensity_network: Model<Vector<Float>, Float>;
+    
+    // Configurações
+    config treatment_var: String = "treatment";
+    config outcome_var: String = "outcome";
+    
+    // Forward pass
+    function forward(x: Vector<Float>) -> Distribution<Float> {
+        // Extrair covariáveis e tratamento
+        var covariates = extract_covariates(x);
+        var treatment = extract_treatment(x);
+        
+        // Calcular componentes
+        var prognostic_score = prognostic_network.forward(covariates);
+        var treatment_effect = treatment_network.forward(covariates);
+        
+        // Calcular média da distribuição
+        var mean = prognostic_score + treatment * treatment_effect;
+        
+        // Calcular variância (incerteza)
+        var variance = compute_variance(covariates, treatment);
+        
+        // Retornar distribuição normal
+        return normal(mean, sqrt(variance));
+    }
+    
+    // Método para extrair covariáveis
+    function extract_covariates(x: Vector<Float>) -> Vector<Float> {
+        // Implementação simplificada
+        return x.slice(0, x.length() - 1);
+    }
+    
+    // Método para extrair tratamento
+    function extract_treatment(x: Vector<Float>) -> Float {
+        return x[x.length() - 1];
+    }
+    
+    // Método para calcular variância
+    function compute_variance(covariates: Vector<Float>, treatment: Float) -> Float {
+        // Implementação simplificada
+        return 0.1;
+    }
+    
+    // Método para calcular efeito de tratamento condicional (CATE)
+    function conditional_average_treatment_effect(covariates: Vector<Float>) -> Float {
+        return treatment_network.forward(covariates);
+    }
+    
+    // Método para calcular efeito de tratamento médio (ATE)
+    function average_treatment_effect(data: Matrix<Float>) -> Float {
+        var sum_cate = 0.0;
+        
+        for (var i = 0; i < data.rows(); i++) {
+            var covariates = extract_covariates(data.row(i));
+            sum_cate += conditional_average_treatment_effect(covariates);
+        }
+        
+        return sum_cate / data.rows();
+    }
+    
+    // Método para calcular propensão ao tratamento
+    function propensity_score(covariates: Vector<Float>) -> Float {
+        return propensity_network.forward(covariates);
+    }
+    
+    // Método para estimar efeitos causais com ajuste de propensão
+    function estimate_causal_effect(data: Matrix<Float>) -> Dict<String, Float> {
+        // Implementação do estimador de ponderação por propensão inversa (IPW)
+        var sum_treated = 0.0;
+        var sum_control = 0.0;
+        var weight_treated = 0.0;
+        var weight_control = 0.0;
+        
+        for (var i = 0; i < data.rows(); i++) {
+            var row = data.row(i);
+            var covariates = extract_covariates(row);
+            var treatment = extract_treatment(row);
+            var outcome = row[outcome_var_index];
+            
+            var ps = propensity_score(covariates);
+            
+            if (treatment > 0.5) {
+                sum_treated += outcome / ps;
+                weight_treated += 1.0 / ps;
+            } else {
+                sum_control += outcome / (1.0 - ps);
+                weight_control += 1.0 / (1.0 - ps);
+            }
+        }
+        
+        var mean_treated = sum_treated / weight_treated;
+        var mean_control = sum_control / weight_control;
+        var ate_ipw = mean_treated - mean_control;
+        
+        // Implementação do estimador de correspondência (Matching)
+        var ate_matching = estimate_matching(data);
+        
+        // Implementação do estimador duplamente robusto (DR)
+        var ate_dr = estimate_doubly_robust(data);
+        
+        return {
+            "ate_ipw": ate_ipw,
+            "ate_matching": ate_matching,
+            "ate_dr": ate_dr
+        };
+    }
+}

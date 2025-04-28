@@ -1,0 +1,388 @@
+// Exemplo de Aprendizado por Reforço em ΩMetaLang
+// Ambiente CartPole com agente PPO
+
+// Definição do ambiente CartPole
+Environment<Vector<Float>, Int> CartPole {
+    // Dimensões do espaço de estados e ações
+    state_dim: 4,  // [posição, velocidade, ângulo, velocidade angular]
+    action_dim: 2, // [empurrar para esquerda, empurrar para direita]
+    
+    // Configurações do ambiente
+    config max_steps: Int = 500;
+    config gravity: Float = 9.8;
+    config cart_mass: Float = 1.0;
+    config pole_mass: Float = 0.1;
+    config pole_length: Float = 0.5;
+    
+    // Método para inicializar o ambiente
+    function reset() -> Vector<Float> {
+        // Retorna um estado inicial com pequenas perturbações aleatórias
+        return [0.0 + random(-0.05, 0.05), 
+                0.0 + random(-0.05, 0.05), 
+                0.0 + random(-0.05, 0.05), 
+                0.0 + random(-0.05, 0.05)];
+    }
+    
+    // Método para executar uma ação no ambiente
+    function step(state: Vector<Float>, action: Int) -> Tuple<Vector<Float>, Float, Bool> {
+        // Implementação da física do pêndulo invertido
+        // Extrai componentes do estado
+        var x = state[0];         // posição do carrinho
+        var x_dot = state[1];     // velocidade do carrinho
+        var theta = state[2];     // ângulo do pêndulo
+        var theta_dot = state[3]; // velocidade angular do pêndulo
+        
+        // Aplica força com base na ação
+        var force = action == 0 ? -10.0 : 10.0;
+        
+        // Equações de movimento (simplificadas)
+        var temp = (force + pole_mass * pole_length * theta_dot * theta_dot * sin(theta)) / (cart_mass + pole_mass);
+        var theta_acc = (gravity * sin(theta) - cos(theta) * temp) / 
+                        (pole_length * (4.0/3.0 - pole_mass * cos(theta) * cos(theta) / (cart_mass + pole_mass)));
+        var x_acc = temp - pole_mass * pole_length * theta_acc * cos(theta) / (cart_mass + pole_mass);
+        
+        // Integração de Euler
+        var dt = 0.02;  // passo de tempo
+        var x_new = x + dt * x_dot;
+        var x_dot_new = x_dot + dt * x_acc;
+        var theta_new = theta + dt * theta_dot;
+        var theta_dot_new = theta_dot + dt * theta_acc;
+        
+        // Novo estado
+        var next_state = [x_new, x_dot_new, theta_new, theta_dot_new];
+        
+        // Verificação de término
+        var done = x_new < -2.4 || x_new > 2.4 || 
+                  theta_new < -0.2094 || theta_new > 0.2094;
+        
+        // Recompensa: 1 para cada passo que o pêndulo permanece equilibrado
+        var reward = done ? 0.0 : 1.0;
+        
+        return (next_state, reward, done);
+    }
+    
+    // Método para renderizar o ambiente (opcional)
+    function render() {
+        // Código para visualização
+    }
+}
+
+// Definição de uma rede neural para política
+model PolicyNetwork<Vector<Float>, Distribution<Int>> {
+    // Parâmetros da rede
+    param fc1_weights: Matrix<Float>;
+    param fc1_bias: Vector<Float>;
+    param fc2_weights: Matrix<Float>;
+    param fc2_bias: Vector<Float>;
+    param output_weights: Matrix<Float>;
+    param output_bias: Vector<Float>;
+    
+    // Configurações
+    config hidden_size: Int = 64;
+    
+    // Inicialização dos parâmetros
+    init {
+        fc1_weights = random_normal(4, hidden_size, 0.0, 0.1);
+        fc1_bias = zeros(hidden_size);
+        fc2_weights = random_normal(hidden_size, hidden_size, 0.0, 0.1);
+        fc2_bias = zeros(hidden_size);
+        output_weights = random_normal(hidden_size, 2, 0.0, 0.1);
+        output_bias = zeros(2);
+    }
+    
+    // Forward pass
+    function forward(state: Vector<Float>) -> Distribution<Int> {
+        // Primeira camada
+        var h1 = relu(matmul(state, fc1_weights) + fc1_bias);
+        
+        // Segunda camada
+        var h2 = relu(matmul(h1, fc2_weights) + fc2_bias);
+        
+        // Camada de saída (logits)
+        var logits = matmul(h2, output_weights) + output_bias;
+        
+        // Converte logits para distribuição categórica
+        return categorical(softmax(logits));
+    }
+}
+
+// Definição de uma rede neural para função valor
+model ValueNetwork<Vector<Float>, Float> {
+    // Parâmetros da rede
+    param fc1_weights: Matrix<Float>;
+    param fc1_bias: Vector<Float>;
+    param fc2_weights: Matrix<Float>;
+    param fc2_bias: Vector<Float>;
+    param output_weights: Vector<Float>;
+    param output_bias: Float;
+    
+    // Configurações
+    config hidden_size: Int = 64;
+    
+    // Inicialização dos parâmetros
+    init {
+        fc1_weights = random_normal(4, hidden_size, 0.0, 0.1);
+        fc1_bias = zeros(hidden_size);
+        fc2_weights = random_normal(hidden_size, hidden_size, 0.0, 0.1);
+        fc2_bias = zeros(hidden_size);
+        output_weights = random_normal(hidden_size, 1, 0.0, 0.1);
+        output_bias = 0.0;
+    }
+    
+    // Forward pass
+    function forward(state: Vector<Float>) -> Float {
+        // Primeira camada
+        var h1 = relu(matmul(state, fc1_weights) + fc1_bias);
+        
+        // Segunda camada
+        var h2 = relu(matmul(h1, fc2_weights) + fc2_bias);
+        
+        // Camada de saída (valor escalar)
+        return dot_product(h2, output_weights) + output_bias;
+    }
+}
+
+// Definição do agente PPO
+Agent<Vector<Float>, Int> PPOAgent {
+    // Redes neurais para política e valor
+    param policy_network: PolicyNetwork;
+    param value_network: ValueNetwork;
+    
+    // Buffer de experiências
+    var experiences: Vector<Experience>;
+    
+    // Hiperparâmetros
+    config clip_ratio: Float = 0.2;
+    config value_coef: Float = 0.5;
+    config entropy_coef: Float = 0.01;
+    config learning_rate: Float = 0.0003;
+    config gamma: Float = 0.99;
+    config lambda: Float = 0.95;
+    config update_epochs: Int = 10;
+    config batch_size: Int = 64;
+    
+    // Método para selecionar ação baseado na política atual
+    function act(state: Vector<Float>) -> Int {
+        var action_dist = policy_network.forward(state);
+        return action_dist.sample();
+    }
+    
+    // Método para calcular vantagens usando GAE (Generalized Advantage Estimation)
+    function compute_advantages(states: Vector<Vector<Float>>, 
+                               rewards: Vector<Float>, 
+                               dones: Vector<Bool>) -> Vector<Float> {
+        var n = states.length();
+        var values = Vector<Float>(n);
+        var advantages = Vector<Float>(n);
+        var returns = Vector<Float>(n);
+        
+        // Calcular valores para todos os estados
+        for (var i = 0; i < n; i++) {
+            values[i] = value_network.forward(states[i]);
+        }
+        
+        // Calcular vantagens e retornos usando GAE
+        var gae = 0.0;
+        for (var t = n - 1; t >= 0; t--) {
+            var next_value = t == n - 1 ? 0.0 : values[t + 1];
+            var next_non_terminal = t == n - 1 ? 0.0 : 1.0 - (dones[t] ? 1.0 : 0.0);
+            
+            var delta = rewards[t] + gamma * next_value * next_non_terminal - values[t];
+            gae = delta + gamma * lambda * next_non_terminal * gae;
+            
+            advantages[t] = gae;
+            returns[t] = advantages[t] + values[t];
+        }
+        
+        return advantages;
+    }
+    
+    // Método para atualizar a política com experiências coletadas
+    function update(experiences: Vector<Experience>) -> Dict<String, Float> {
+        // Extrair estados, ações, recompensas, etc. das experiências
+        var states = experiences.map(e => e.state);
+        var actions = experiences.map(e => e.action);
+        var rewards = experiences.map(e => e.reward);
+        var dones = experiences.map(e => e.done);
+        
+        // Calcular vantagens e retornos
+        var advantages = compute_advantages(states, rewards, dones);
+        var returns = Vector<Float>(advantages.length());
+        for (var i = 0; i < advantages.length(); i++) {
+            returns[i] = advantages[i] + value_network.forward(states[i]);
+        }
+        
+        // Normalizar vantagens
+        var adv_mean = mean(advantages);
+        var adv_std = std(advantages);
+        for (var i = 0; i < advantages.length(); i++) {
+            advantages[i] = (advantages[i] - adv_mean) / (adv_std + 1e-8);
+        }
+        
+        // Calcular probabilidades de ação sob a política atual
+        var old_action_probs = Vector<Float>(states.length());
+        for (var i = 0; i < states.length(); i++) {
+            var dist = policy_network.forward(states[i]);
+            old_action_probs[i] = dist.log_prob(actions[i]);
+        }
+        
+        // Métricas para retornar
+        var metrics = {
+            "policy_loss": 0.0,
+            "value_loss": 0.0,
+            "entropy": 0.0,
+            "total_loss": 0.0
+        };
+        
+        // Múltiplas épocas de atualização
+        for (var epoch = 0; epoch < update_epochs; epoch++) {
+            // Embaralhar dados
+            var indices = range(0, states.length());
+            shuffle(indices);
+            
+            // Processar em mini-lotes
+            for (var start = 0; start < states.length(); start += batch_size) {
+                var end = min(start + batch_size, states.length());
+                var batch_indices = indices.slice(start, end);
+                
+                var batch_states = batch_indices.map(i => states[i]);
+                var batch_actions = batch_indices.map(i => actions[i]);
+                var batch_advantages = batch_indices.map(i => advantages[i]);
+                var batch_returns = batch_indices.map(i => returns[i]);
+                var batch_old_action_probs = batch_indices.map(i => old_action_probs[i]);
+                
+                // Forward pass da política atual
+                var policy_loss = 0.0;
+                var entropy_sum = 0.0;
+                
+                for (var i = 0; i < batch_states.length(); i++) {
+                    var dist = policy_network.forward(batch_states[i]);
+                    var log_prob = dist.log_prob(batch_actions[i]);
+                    var ratio = exp(log_prob - batch_old_action_probs[i]);
+                    
+                    // Clipped surrogate objective
+                    var surr1 = ratio * batch_advantages[i];
+                    var surr2 = clip(ratio, 1.0 - clip_ratio, 1.0 + clip_ratio) * batch_advantages[i];
+                    policy_loss -= min(surr1, surr2);
+                    
+                    // Entropy bonus
+                    entropy_sum += dist.entropy();
+                }
+                
+                policy_loss /= batch_states.length();
+                entropy_sum /= batch_states.length();
+                
+                // Forward pass da função valor atual
+                var value_loss = 0.0;
+                for (var i = 0; i < batch_states.length(); i++) {
+                    var value = value_network.forward(batch_states[i]);
+                    value_loss += pow(value - batch_returns[i], 2);
+                }
+                value_loss /= batch_states.length();
+                
+                // Perda total
+                var total_loss = policy_loss + value_coef * value_loss - entropy_coef * entropy_sum;
+                
+                // Atualizar métricas
+                metrics["policy_loss"] += policy_loss / update_epochs;
+                metrics["value_loss"] += value_loss / update_epochs;
+                metrics["entropy"] += entropy_sum / update_epochs;
+                metrics["total_loss"] += total_loss / update_epochs;
+                
+                // Atualizar parâmetros (simplificado)
+                // Na implementação real, aqui teríamos o cálculo de gradientes e a atualização dos parâmetros
+            }
+        }
+        
+        return metrics;
+    }
+}
+
+// Definição do experimento de treinamento
+experiment CartPoleTraining {
+    // Componentes principais
+    environment: CartPole;
+    agent: PPOAgent;
+    
+    // Configuração de treinamento
+    train: {
+        episodes: 1000,
+        steps_per_update: 2048,
+        updates_per_epoch: 10,
+        epochs: 50
+    };
+    
+    // Métricas e visualização
+    metrics: {
+        episode_return: running_mean(100),
+        episode_length: running_mean(100)
+    };
+    
+    visualize: {
+        frequency: "episode",
+        interval: 100
+    };
+    
+    // Método principal de treinamento
+    function run() {
+        var total_steps = 0;
+        var experiences = Vector<Experience>();
+        
+        for (var epoch = 0; epoch < train.epochs; epoch++) {
+            for (var update = 0; update < train.updates_per_epoch; update++) {
+                experiences.clear();
+                
+                // Coletar experiências
+                while (experiences.length() < train.steps_per_update) {
+                    var state = environment.reset();
+                    var episode_return = 0.0;
+                    var episode_length = 0;
+                    var done = false;
+                    
+                    while (!done && episode_length < environment.max_steps) {
+                        // Selecionar ação
+                        var action = agent.act(state);
+                        
+                        // Executar ação no ambiente
+                        var (next_state, reward, done) = environment.step(state, action);
+                        
+                        // Armazenar experiência
+                        experiences.push({
+                            state: state,
+                            action: action,
+                            reward: reward,
+                            next_state: next_state,
+                            done: done
+                        });
+                        
+                        // Atualizar estado
+                        state = next_state;
+                        episode_return += reward;
+                        episode_length += 1;
+                        total_steps += 1;
+                    }
+                    
+                    // Registrar métricas
+                    metrics.episode_return.update(episode_return);
+                    metrics.episode_length.update(episode_length);
+                    
+                    // Visualizar se necessário
+                    if (total_steps % (visualize.interval * environment.max_steps) < environment.max_steps) {
+                        environment.render();
+                    }
+                }
+                
+                // Atualizar agente
+                var update_metrics = agent.update(experiences);
+                
+                // Registrar métricas de atualização
+                for (var key in update_metrics) {
+                    log(f"Epoch {epoch}, Update {update}, {key}: {update_metrics[key]}");
+                }
+            }
+            
+            // Registrar progresso
+            log(f"Epoch {epoch}, Mean Return: {metrics.episode_return.value()}, Mean Length: {metrics.episode_length.value()}");
+        }
+    }
+}

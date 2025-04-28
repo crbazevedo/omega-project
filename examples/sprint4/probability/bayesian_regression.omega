@@ -1,0 +1,328 @@
+// Exemplo de Modelagem de Distribuições de Probabilidade em ΩMetaLang
+// Modelo de Regressão Bayesiana com Quantificação de Incerteza
+
+// Definição do modelo de regressão bayesiana
+model BayesianRegression<Vector<Float>, Distribution<Float>> {
+    // Parâmetros do modelo
+    param weights_mu: Vector<Float>;
+    param weights_sigma: Vector<Float>;
+    param bias_mu: Float;
+    param bias_sigma: Float;
+    param noise_sigma: Float;
+    
+    // Configurações
+    config input_dim: Int = 10;
+    config prior_scale: Float = 1.0;
+    config num_samples: Int = 100;
+    
+    // Inicialização dos parâmetros
+    init {
+        weights_mu = zeros(input_dim);
+        weights_sigma = ones(input_dim) * prior_scale;
+        bias_mu = 0.0;
+        bias_sigma = prior_scale;
+        noise_sigma = 0.1;
+    }
+    
+    // Forward pass que retorna uma distribuição
+    function forward(x: Vector<Float>) -> Distribution<Float> {
+        // Amostra pesos da distribuição posterior
+        var weights = normal(weights_mu, weights_sigma).sample();
+        var bias = normal(bias_mu, bias_sigma).sample();
+        
+        // Calcula média da predição
+        var mean = dot_product(x, weights) + bias;
+        
+        // Calcula variância da predição (incerteza)
+        var variance = compute_predictive_variance(x, weights_sigma) + noise_sigma * noise_sigma;
+        
+        // Retorna distribuição normal com a média e variância calculadas
+        return normal(mean, sqrt(variance));
+    }
+    
+    // Método para calcular a variância preditiva
+    function compute_predictive_variance(x: Vector<Float>, weight_vars: Vector<Float>) -> Float {
+        var variance = 0.0;
+        for (var i = 0; i < x.length(); i++) {
+            variance += x[i] * x[i] * weight_vars[i];
+        }
+        return variance;
+    }
+    
+    // Método para amostragem de múltiplas predições
+    function predict_samples(x: Vector<Float>, num_samples: Int = 100) -> Vector<Float> {
+        var distribution = forward(x);
+        return distribution.sample(num_samples);
+    }
+    
+    // Método para intervalo de predição
+    function prediction_interval(x: Vector<Float>, confidence: Float = 0.95) -> Tuple<Float, Float> {
+        var dist = forward(x);
+        var alpha = 1.0 - confidence;
+        return (dist.quantile(alpha/2), dist.quantile(1 - alpha/2));
+    }
+    
+    // Método para atualizar o modelo com dados
+    function update(X: Matrix<Float>, y: Vector<Float>) {
+        // Implementação simplificada de inferência bayesiana
+        // Na prática, usaríamos MCMC, VI ou outra técnica
+        
+        var n = X.rows();
+        var d = X.cols();
+        
+        // Matriz de precisão prior
+        var prior_precision = Matrix<Float>(d, d);
+        for (var i = 0; i < d; i++) {
+            prior_precision[i, i] = 1.0 / (weights_sigma[i] * weights_sigma[i]);
+        }
+        
+        // Matriz de precisão posterior
+        var posterior_precision = prior_precision.copy();
+        for (var i = 0; i < n; i++) {
+            var x_i = X.row(i);
+            for (var j = 0; j < d; j++) {
+                for (var k = 0; k < d; k++) {
+                    posterior_precision[j, k] += x_i[j] * x_i[k] / (noise_sigma * noise_sigma);
+                }
+            }
+        }
+        
+        // Matriz de covariância posterior
+        var posterior_covariance = inverse(posterior_precision);
+        
+        // Média posterior
+        var temp = zeros(d);
+        for (var i = 0; i < n; i++) {
+            var x_i = X.row(i);
+            for (var j = 0; j < d; j++) {
+                temp[j] += x_i[j] * y[i] / (noise_sigma * noise_sigma);
+            }
+        }
+        
+        var posterior_mean = matmul(posterior_covariance, temp);
+        
+        // Atualizar parâmetros
+        weights_mu = posterior_mean;
+        for (var i = 0; i < d; i++) {
+            weights_sigma[i] = sqrt(posterior_covariance[i, i]);
+        }
+    }
+}
+
+// Definição de uma política probabilística para espaço de ações contínuo
+model GaussianPolicy<Vector<Float>, Distribution<Vector<Float>>> {
+    // Redes para média e desvio padrão
+    param mean_network: Model<Vector<Float>, Vector<Float>>;
+    param std_network: Model<Vector<Float>, Vector<Float>>;
+    
+    // Configurações
+    config action_dim: Int = 2;
+    config min_std: Float = 1e-6;
+    config max_std: Float = 1.0;
+    
+    // Inicialização
+    init {
+        mean_network = MLPNetwork<Vector<Float>, Vector<Float>>(
+            input_dim: state_dim,
+            output_dim: action_dim,
+            hidden_dims: [64, 64],
+            activation: "tanh"
+        );
+        
+        std_network = MLPNetwork<Vector<Float>, Vector<Float>>(
+            input_dim: state_dim,
+            output_dim: action_dim,
+            hidden_dims: [64, 64],
+            activation: "tanh"
+        );
+    }
+    
+    // Forward pass retorna distribuição multivariada
+    function forward(state: Vector<Float>) -> Distribution<Vector<Float>> {
+        var mean = mean_network.forward(state);
+        var log_std = std_network.forward(state);
+        
+        // Limita o desvio padrão
+        var std = Vector<Float>(action_dim);
+        for (var i = 0; i < action_dim; i++) {
+            std[i] = clip(exp(log_std[i]), min_std, max_std);
+        }
+        
+        // Retorna distribuição normal multivariada
+        return multivariate_normal(mean, std);
+    }
+    
+    // Amostra ação da política
+    function sample_action(state: Vector<Float>) -> Vector<Float> {
+        var action_dist = forward(state);
+        return action_dist.sample();
+    }
+    
+    // Calcula log-probabilidade de uma ação
+    function log_prob(state: Vector<Float>, action: Vector<Float>) -> Float {
+        var action_dist = forward(state);
+        return action_dist.log_pdf(action);
+    }
+    
+    // Calcula entropia da distribuição
+    function entropy(state: Vector<Float>) -> Float {
+        var action_dist = forward(state);
+        return action_dist.entropy();
+    }
+}
+
+// Exemplo de modelo de mistura de gaussianas
+model GaussianMixture<Vector<Float>, Distribution<Float>> {
+    // Parâmetros do modelo
+    param means: Vector<Float>;
+    param stds: Vector<Float>;
+    param weights: Vector<Float>;
+    
+    // Configurações
+    config num_components: Int = 3;
+    
+    // Inicialização
+    init {
+        means = Vector<Float>(num_components);
+        stds = Vector<Float>(num_components);
+        weights = Vector<Float>(num_components);
+        
+        for (var i = 0; i < num_components; i++) {
+            means[i] = random_normal(0.0, 1.0);
+            stds[i] = abs(random_normal(0.0, 0.5)) + 0.1;
+            weights[i] = 1.0 / num_components;
+        }
+    }
+    
+    // Forward pass
+    function forward(x: Vector<Float>) -> Distribution<Float> {
+        // Características extraídas do input
+        var features = extract_features(x);
+        
+        // Ajusta os parâmetros da mistura com base nas características
+        var adjusted_means = Vector<Float>(num_components);
+        var adjusted_stds = Vector<Float>(num_components);
+        var adjusted_weights = Vector<Float>(num_components);
+        
+        for (var i = 0; i < num_components; i++) {
+            adjusted_means[i] = means[i] + dot_product(features, weights_for_mean[i]);
+            adjusted_stds[i] = stds[i] * exp(dot_product(features, weights_for_std[i]));
+            adjusted_weights[i] = weights[i];
+        }
+        
+        // Normaliza os pesos
+        var sum_weights = 0.0;
+        for (var i = 0; i < num_components; i++) {
+            sum_weights += adjusted_weights[i];
+        }
+        for (var i = 0; i < num_components; i++) {
+            adjusted_weights[i] /= sum_weights;
+        }
+        
+        // Cria a mistura de gaussianas
+        return mixture(
+            components: [normal(adjusted_means[0], adjusted_stds[0]), 
+                         normal(adjusted_means[1], adjusted_stds[1]), 
+                         normal(adjusted_means[2], adjusted_stds[2])],
+            weights: adjusted_weights
+        );
+    }
+    
+    // Extrai características do input
+    function extract_features(x: Vector<Float>) -> Vector<Float> {
+        // Implementação simplificada
+        return x;
+    }
+    
+    // Calcula log-verossimilhança
+    function log_likelihood(x: Vector<Float>, y: Float) -> Float {
+        var dist = forward(x);
+        return dist.log_pdf(y);
+    }
+    
+    // Amostra da distribuição
+    function sample(x: Vector<Float>, num_samples: Int = 1) -> Vector<Float> {
+        var dist = forward(x);
+        return dist.sample(num_samples);
+    }
+}
+
+// Exemplo de experimento com modelo bayesiano
+experiment BayesianRegressionExperiment {
+    // Modelo
+    model: BayesianRegression;
+    
+    // Dados
+    data: {
+        train: {
+            X: Matrix<Float>,
+            y: Vector<Float>
+        },
+        test: {
+            X: Matrix<Float>,
+            y: Vector<Float>
+        }
+    };
+    
+    // Configurações
+    config num_samples: Int = 1000;
+    config confidence_level: Float = 0.95;
+    
+    // Método principal
+    function run() {
+        // Treinar o modelo
+        model.update(data.train.X, data.train.y);
+        
+        // Avaliar o modelo
+        var rmse = 0.0;
+        var log_likelihood = 0.0;
+        var coverage = 0.0;
+        
+        for (var i = 0; i < data.test.X.rows(); i++) {
+            var x = data.test.X.row(i);
+            var y_true = data.test.y[i];
+            
+            // Obter distribuição preditiva
+            var dist = model.forward(x);
+            var y_pred = dist.mean();
+            
+            // Calcular métricas
+            rmse += pow(y_pred - y_true, 2);
+            log_likelihood += dist.log_pdf(y_true);
+            
+            // Verificar cobertura do intervalo de predição
+            var (lower, upper) = model.prediction_interval(x, confidence_level);
+            if (y_true >= lower && y_true <= upper) {
+                coverage += 1.0;
+            }
+        }
+        
+        // Normalizar métricas
+        var n = data.test.X.rows();
+        rmse = sqrt(rmse / n);
+        log_likelihood /= n;
+        coverage /= n;
+        
+        // Reportar resultados
+        log(f"RMSE: {rmse}");
+        log(f"Log-likelihood: {log_likelihood}");
+        log(f"Coverage at {confidence_level * 100}%: {coverage * 100}%");
+        
+        // Visualizar incerteza para alguns exemplos
+        for (var i = 0; i < min(5, data.test.X.rows()); i++) {
+            var x = data.test.X.row(i);
+            var y_true = data.test.y[i];
+            
+            // Obter amostras da distribuição preditiva
+            var samples = model.predict_samples(x, num_samples);
+            
+            // Obter intervalo de predição
+            var (lower, upper) = model.prediction_interval(x, confidence_level);
+            
+            log(f"Example {i}:");
+            log(f"  True: {y_true}");
+            log(f"  Pred: {model.forward(x).mean()} ± {model.forward(x).std()}");
+            log(f"  {confidence_level * 100}% CI: [{lower}, {upper}]");
+        }
+    }
+}
