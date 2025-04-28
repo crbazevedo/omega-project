@@ -1,0 +1,26 @@
+// Example 9: Clustering
+OmegaSpec ClusteringModel {
+    Variable data_dim : Int = 10;           // Dimensionality of data
+    Variable num_samples : Int = 500;       // Number of samples
+    Variable num_clusters : Int = 5;        // Number of clusters to find
+    
+    Variable data : Matrix<Float, num_samples, data_dim>;
+    Variable cluster_assignments : Vector<Int, num_samples>;
+    Variable cluster_centers : Matrix<Float, num_clusters, data_dim>;
+    
+    Model kmeans {
+        Input: data;
+        Output: cluster_assignments;
+        Parameter centers : Matrix<Float, num_clusters, data_dim>;
+        Structure: "KMeans"; // Reference to a predefined clustering algorithm
+        Loss: ClusteringLoss(data, centers, cluster_assignments);
+    }
+    
+    Objective {
+        Minimize: S;  // Minimize within-cluster variance
+        Constraint: MinClusterSize(cluster_assignments) > 10; // Ensure no tiny clusters
+        WeightS: 1.0; // λ
+        WeightA: 0.0; // β
+        WeightE: 0.05; // μ (Computational cost)
+    }
+}

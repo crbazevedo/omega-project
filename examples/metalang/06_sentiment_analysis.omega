@@ -1,0 +1,35 @@
+// Example 6: Natural Language Processing
+OmegaSpec SentimentAnalysis {
+    Variable vocab_size : Int = 10000;      // Vocabulary size
+    Variable max_seq_len : Int = 100;       // Maximum sequence length
+    Variable embedding_dim : Int = 300;     // Word embedding dimension
+    Variable num_classes : Int = 3;         // Number of sentiment classes (negative, neutral, positive)
+    
+    Variable text_input : Vector<Int, max_seq_len>;  // Tokenized text (word indices)
+    Variable mask : Vector<Bool, max_seq_len>;       // Mask for padding (true for actual tokens)
+    Variable sentiment : Int;                        // Ground truth sentiment class
+    Variable predicted_sentiment : Vector<Float, num_classes>; // Predicted sentiment probabilities
+    
+    Model sentiment_classifier {
+        Input: text_input;
+        Output: predicted_sentiment;
+        Parameter embeddings : Matrix<Float, vocab_size, embedding_dim>;
+        Structure: Custom {
+            Embedding(input=text_input, embedding_matrix=embeddings);
+            LSTM(units=128, return_sequences=false);
+            Dropout(rate=0.2);
+            Dense(units=64, activation="relu");
+            Dropout(rate=0.2);
+            Dense(units=num_classes, activation="softmax");
+        };
+        Loss: CategoricalCrossEntropy(OneHot(sentiment, num_classes), predicted_sentiment);
+    }
+    
+    Objective {
+        Minimize: S;  // Minimize prediction error
+        Constraint: L2Norm(sentiment_classifier.embeddings) < 100.0;
+        WeightS: 1.0;  // λ
+        WeightA: 0.0;  // β
+        WeightE: 0.05; // μ (Computational cost)
+    }
+}

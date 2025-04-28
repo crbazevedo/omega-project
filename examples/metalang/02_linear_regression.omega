@@ -1,0 +1,25 @@
+// Example 2: Linear Regression
+OmegaSpec LinearRegressionExample {
+    Variable X_train : Matrix<Float, 500, 5>; // Training data features
+    Variable y_train : Vector<Float, 500>;   // Training data targets
+    Variable X_test : Matrix<Float, 100, 5>;  // Test data features
+    Variable y_pred : Vector<Float, 100>;   // Predicted values
+
+    Model regressor {
+        Input: X_train;
+        Output: y_pred; // Output for prediction on test set
+        Parameter weights : Vector<Float, 5>;
+        Parameter bias : Float;
+        Structure: LinearRegression; // Use predefined linear regression model
+        Loss: MeanSquaredError(y_train, Predict(regressor, X_train)); // Loss on training data
+    }
+
+    Objective {
+        Minimize: S; // Minimize training loss (Surprise)
+        Constraint: Complexity(regressor.weights) < 10.0; // Constraint on weight complexity (C)
+        WeightS: 1.0; // λ
+        WeightA: 0.0; // β (No explicit adaptive action)
+        WeightE: 0.05;// μ (Cost penalty, e.g., for training time)
+    }
+}
+

@@ -1,0 +1,40 @@
+# Todo - Sprint 1 do Projeto Omega (Foco: DSL e Parser)
+
+- [x] 001: Analisar requisitos do Sprint 1
+  - [x] Revisar User Stories do Sprint 1 (US-1.1 e US-1.2)
+  - [x] Identificar componentes envolvidos (C-01 e C-16)
+  - [x] Entender escopo do Sprint 1 (DSL e Parser)
+- [x] 002: Planejar tarefas do Sprint 1
+  - [x] Detalhar implementação do Parser (US-1.1)
+  - [x] Detalhar implementação do ΩScribe (US-1.2)
+  - [x] Definir scripts de exemplo para teste do Parser
+  - [x] Definir briefings de exemplo para teste do ΩScribe
+  - [x] Estabelecer critérios de aceitação
+- [ ] 003: Refinar implementação do Parser (US-1.1)
+  - [ ] Garantir conformidade com requisitos (LL(1) ou equivalente Lark)
+  - [ ] Melhorar tratamento de erros
+  - [ ] Validar geração da AST
+- [x] 004: Desenvolver scripts de exemplo (US-1.1)
+  - [x] Criar 10 scripts ΩMetaLang cobrindo diferentes casos
+- [ ] 005: Implementar ΩScribe (US-1.2)
+  - [ ] Desenvolver lógica inicial de conversão Briefing -> ΩMetaLang
+  - [ ] Implementar interface do agente
+- [x] 006: Desenvolver briefings de exemplo (US-1.2)
+  - [x] Criar briefings simples para teste do ΩScribe
+- [ ] 007: Integrar ΩScribe e Parser
+  - [ ] Garantir que a saída do ΩScribe seja parsável
+  - [ ] Implementar fluxo Scribe -> Parser
+- [ ] 008: Criar testes unitários e de integração
+  - [ ] Testes para o Parser com scripts de exemplo
+  - [ ] Testes para o ΩScribe com briefings de exemplo
+  - [ ] Testes de integração para o fluxo Scribe -> Parser
+- [ ] 009: Revisar e refinar implementações
+  - [ ] Otimizar código
+  - [ ] Corrigir bugs identificados
+- [ ] 010: Documentar progresso e resultados
+  - [ ] Atualizar documentação do Parser e ΩScribe
+  - [ ] Documentar exemplos e testes
+- [ ] 011: Entregar Sprint 1 ao usuário
+  - [ ] Preparar demonstração
+  - [ ] Compilar resultados
+  - [ ] Apresentar entregáveis

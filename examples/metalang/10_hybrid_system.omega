@@ -1,0 +1,65 @@
+// Example 10: Hybrid System (Classification + RL)
+OmegaSpec HybridSystem {
+    // Variables for Classification Part
+    Variable image_input : Tensor<Float, 1, 64, 64, 3>;
+    Variable object_class : Int;
+    Variable predicted_class : Vector<Float, 10>; // 10 object classes
+
+    // Variables for RL Part
+    Variable state : Vector<Float, 10>; // State representation (e.g., based on classification confidence)
+    Variable action : Int;             // Action to take (e.g., adjust focus, move camera)
+    Variable reward : Float;
+    Variable next_state : Vector<Float, 10>;
+    Variable done : Bool;
+
+    // Classification Model
+    Model object_classifier {
+        Input: image_input;
+        Output: predicted_class;
+        Structure: Custom {
+            Conv2D(filters=16, kernel_size=3, activation="relu");
+            MaxPooling2D(pool_size=2);
+            Flatten();
+            Dense(units=32, activation="relu");
+            Dense(units=10, activation="softmax");
+        };
+        Loss: CategoricalCrossEntropy(OneHot(object_class, 10), predicted_class);
+    }
+
+    // RL Environment (Simplified)
+    Environment control_env {
+        State: state;
+        Observation: state;
+        Reward: reward;
+        Dynamics: Custom { // Dynamics depend on classification and external factors
+            UpdateState(state, action, predicted_class);
+        };
+        InitialState: InitialControlState();
+    }
+
+    // RL Action
+    Action control_action {
+        Type: Discrete;
+        Space: DiscreteSpace(3); // e.g., 3 possible control actions
+        Policy: Softmax(temperature=0.5);
+    }
+
+    // RL Model (Policy Network)
+    Model policy_network {
+        Input: state;
+        Output: action;
+        Structure: Custom {
+            Dense(units=32, activation="relu");
+            Dense(units=3, activation="softmax"); // Output probabilities for 3 actions
+        };
+        Loss: PolicyGradientLoss(state, action, reward);
+    }
+
+    Objective {
+        Minimize: S_classifier = object_classifier.Loss; // Minimize classification error
+        Maximize: A_rl = CumulativeReward(control_env); // Maximize RL reward
+        WeightS: 0.6; // λ for classification surprise
+        WeightA: 0.4; // β for RL adaptive action
+        WeightE: 0.1; // μ for overall cost
+    }
+}

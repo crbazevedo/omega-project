@@ -1,0 +1,49 @@
+// Example 4: Reinforcement Learning Agent
+OmegaSpec RLAgent {
+    Variable state_dim : Int = 4;      // State dimensionality (e.g., CartPole)
+    Variable action_dim : Int = 2;     // Action dimensionality (e.g., left/right)
+    Variable state : Vector<Float, state_dim>;
+    Variable action : Int;             // Discrete action
+    Variable reward : Float;
+    Variable next_state : Vector<Float, state_dim>;
+    Variable done : Bool;
+
+    Environment cartpole {
+        State: state;
+        Observation: state;
+        Reward: reward;
+        Dynamics: External {
+            "gym:CartPole-v1",
+            render=false
+        };
+        InitialState: RandomInitializer();
+    }
+
+    Action agent_action {
+        Type: Discrete;
+        Space: DiscreteSpace(action_dim);
+        Policy: EpsilonGreedy(0.1);
+    }
+
+    Model q_network {
+        Input: state;
+        Output: action;
+        Structure: Custom {
+            Dense(units=64, activation="relu");
+            Dense(units=64, activation="relu");
+            Dense(units=action_dim, activation="linear");
+        };
+        Loss: MeanSquaredError(
+            Q(state, action), 
+            reward + 0.99 * MaxQ(next_state) * (1 - done)
+        );
+    }
+
+    Objective {
+        Maximize: A;  // Maximize cumulative reward (Adaptive Action)
+        Minimize: S;  // Minimize prediction error (Surprise)
+        WeightS: 0.5; // λ
+        WeightA: 1.0; // β
+        WeightE: 0.1; // μ
+    }
+}

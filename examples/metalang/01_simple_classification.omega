@@ -1,0 +1,21 @@
+// Example 1: Simple Classification (Logistic Regression)
+OmegaSpec SimpleClassifier {
+    Variable X : Matrix<Float, 100, 10>; // Example: 100 samples, 10 features
+    Variable y : Vector<Int, 100>;     // Example: 100 labels (0 or 1)
+    Variable y_pred : Vector<Float, 100>; // Predicted probabilities
+
+    Model classifier {
+        Input: X;
+        Output: y_pred;
+        Structure: LogisticRegression;
+        Loss: CrossEntropy(y, y_pred);
+    }
+
+    Objective {
+        Minimize: S;  // S is implicitly linked to the model's Loss
+        WeightS: 1.0; // λ
+        WeightA: 0.0; // β (No explicit adaptive action here)
+        WeightE: 0.01;// μ (Cost penalty)
+    }
+}
+

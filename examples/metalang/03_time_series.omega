@@ -1,0 +1,24 @@
+// Example 3: Time Series Forecasting (e.g., ARIMA)
+OmegaSpec TimeSeriesForecast {
+    Variable history : Vector<Float, 1000>; // Historical time series data
+    Variable future_steps : Int = 10;      // Number of steps to forecast
+    Variable forecast : Vector<Float, future_steps>; // Forecasted values
+
+    Model arima_model {
+        Input: history;
+        Output: forecast;
+        Parameter p : Int = 5; // AR order
+        Parameter d : Int = 1; // Differencing order
+        Parameter q : Int = 0; // MA order
+        Structure: "ARIMA"; // Reference a predefined ARIMA model or implementation
+        Loss: MeanAbsoluteError(ActualFuture(history, future_steps), forecast);
+    }
+
+    Objective {
+        Minimize: S; // Minimize forecast error (Surprise)
+        WeightS: 1.0; // λ
+        WeightA: 0.0; // β
+        WeightE: 0.1; // μ (Cost for model fitting/forecasting)
+    }
+}
+

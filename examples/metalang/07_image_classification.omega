@@ -1,0 +1,35 @@
+// Example 7: Computer Vision (Image Classification)
+OmegaSpec ImageClassifier {
+    Variable image_height : Int = 224;
+    Variable image_width : Int = 224;
+    Variable channels : Int = 3;
+    Variable num_classes : Int = 1000; // e.g., ImageNet classes
+
+    Variable image_input : Tensor<Float, 1, image_height, image_width, channels>; // Batch size 1
+    Variable label : Int;
+    Variable predicted_label : Vector<Float, num_classes>; // Probabilities
+
+    Model cnn_classifier {
+        Input: image_input;
+        Output: predicted_label;
+        Structure: Custom {
+            // Simplified CNN structure
+            Conv2D(filters=32, kernel_size=3, activation="relu");
+            MaxPooling2D(pool_size=2);
+            Conv2D(filters=64, kernel_size=3, activation="relu");
+            MaxPooling2D(pool_size=2);
+            Flatten();
+            Dense(units=128, activation="relu");
+            Dropout(rate=0.5);
+            Dense(units=num_classes, activation="softmax");
+        };
+        Loss: CategoricalCrossEntropy(OneHot(label, num_classes), predicted_label);
+    }
+
+    Objective {
+        Minimize: S; // Minimize classification error
+        WeightS: 1.0; // λ
+        WeightA: 0.0; // β
+        WeightE: 0.1; // μ (Computational cost for training/inference)
+    }
+}

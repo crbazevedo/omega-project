@@ -1,0 +1,37 @@
+// Example 5: Recommendation System
+OmegaSpec RecommendationSystem {
+    Variable users : Int = 1000;           // Number of users
+    Variable items : Int = 5000;           // Number of items
+    Variable features : Int = 50;          // Latent feature dimension
+    Variable ratings : Matrix<Float, users, items>; // Sparse matrix of known ratings
+    Variable mask : Matrix<Bool, users, items>;    // Mask for known ratings (true if rating exists)
+    Variable predictions : Matrix<Float, users, items>; // Predicted ratings
+
+    Model matrix_factorization {
+        Input: ratings;
+        Output: predictions;
+        Parameter user_factors : Matrix<Float, users, features>;
+        Parameter item_factors : Matrix<Float, items, features>;
+        Structure: Custom {
+            // Matrix factorization: predictions = user_factors * item_factors^T
+            MatrixProduct(user_factors, Transpose(item_factors));
+        };
+        Loss: MaskedMeanSquaredError(ratings, predictions, mask);
+    }
+
+    Domain rating_constraints {
+        min_rating: 1.0;
+        max_rating: 5.0;
+        sparsity: 0.95; // 95% of ratings are unknown
+    }
+
+    Objective {
+        Minimize: S;  // Minimize prediction error on known ratings
+        Constraint: L2Norm(matrix_factorization.user_factors) < 10.0;
+        Constraint: L2Norm(matrix_factorization.item_factors) < 10.0;
+        Constraint: ClipValues(predictions, rating_constraints.min_rating, rating_constraints.max_rating);
+        WeightS: 1.0;  // λ
+        WeightA: 0.0;  // β
+        WeightE: 0.05; // μ (Computational cost)
+    }
+}

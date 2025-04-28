@@ -1,0 +1,40 @@
+// Example 8: Anomaly Detection
+OmegaSpec AnomalyDetection {
+    Variable data_dim : Int = 20;           // Dimensionality of data
+    Variable normal_samples : Int = 1000;   // Number of normal samples for training
+    Variable test_samples : Int = 200;      // Number of test samples (mix of normal and anomalous)
+    
+    Variable training_data : Matrix<Float, normal_samples, data_dim>;
+    Variable test_data : Matrix<Float, test_samples, data_dim>;
+    Variable anomaly_scores : Vector<Float, test_samples>;
+    Variable is_anomaly : Vector<Bool, test_samples>;  // Ground truth labels
+    
+    Model autoencoder {
+        Input: training_data;
+        Output: anomaly_scores;
+        Structure: Custom {
+            // Encoder
+            Dense(units=64, activation="relu");
+            Dense(units=32, activation="relu");
+            Dense(units=16, activation="relu");
+            // Latent space
+            Dense(units=8, activation="linear");
+            // Decoder
+            Dense(units=16, activation="relu");
+            Dense(units=32, activation="relu");
+            Dense(units=64, activation="relu");
+            Dense(units=data_dim, activation="linear");
+            // Compute reconstruction error as anomaly score
+            ReconstructionError();
+        };
+        Loss: MeanSquaredError(training_data, Reconstruct(autoencoder, training_data));
+    }
+    
+    Objective {
+        Minimize: S;  // Minimize reconstruction error on normal data
+        Maximize: A;  // Maximize detection performance (e.g., AUC)
+        WeightS: 0.7; // λ
+        WeightA: 0.3; // β
+        WeightE: 0.1; // μ
+    }
+}
